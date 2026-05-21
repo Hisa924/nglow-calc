@@ -49,7 +49,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
 .ss-chev{color:rgba(255,255,255,.35);font-size:18px}
 .ss-active .ss-name{color:var(--accent)}
 /* テープ */
-.tape{flex:1;overflow-y:auto;padding:4px 0;display:flex;flex-direction:column;justify-content:flex-end;min-height:90px}
+.tape{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 0;display:flex;flex-direction:column;min-height:90px}
+.tape::before{content:"";margin-top:auto}
 .tape-line{font-size:17px;color:rgba(255,255,255,.62);text-align:left;padding:11px 18px;cursor:pointer;line-height:1.45;word-break:break-all;border-bottom:1px solid rgba(255,255,255,.09)}
 .tape-line:first-child{border-top:1px solid rgba(255,255,255,.09)}
 .tape-line:active{background:rgba(79,195,247,.12)}
@@ -620,14 +621,20 @@ function renderTape(){
 // スワイプ: 左で削除 / 右で複製
 function bindSwipe(){
   document.querySelectorAll('.tape-line[data-id]').forEach(row=>{
-    let x0=null,dx=0;
-    row.addEventListener('touchstart',e=>{ x0=e.touches[0].clientX; dx=0; row.style.transition='none'; },{passive:true});
-    row.addEventListener('touchmove',e=>{ if(x0==null)return; dx=e.touches[0].clientX-x0; row.style.transform='translateX('+dx+'px)'; },{passive:true});
-    row.addEventListener('touchend',()=>{ if(x0==null)return; row.style.transition='transform .15s'; const id=row.dataset.id;
-      if(dx<-70){ row.style.transform='translateX(-110%)'; setTimeout(()=>delLine(id),130); }
-      else if(dx>70){ row.style.transform='translateX(0)'; dupLine(id); }
-      else { row.style.transform='translateX(0)'; }
-      x0=null;
+    let x0=null,y0=null,dx=0,horiz=false;
+    row.addEventListener('touchstart',e=>{ x0=e.touches[0].clientX; y0=e.touches[0].clientY; dx=0; horiz=false; row.style.transition='none'; },{passive:true});
+    row.addEventListener('touchmove',e=>{ if(x0==null)return;
+      const ddx=e.touches[0].clientX-x0, ddy=e.touches[0].clientY-y0;
+      if(!horiz && Math.abs(ddx)>Math.abs(ddy)+8) horiz=true;   // 横方向が優勢なときだけスワイプ扱い
+      if(horiz){ dx=ddx; row.style.transform='translateX('+dx+'px)'; }
+    },{passive:true});   // passive=true: 縦スクロールは妨げない
+    row.addEventListener('touchend',()=>{ if(x0==null)return; const id=row.dataset.id;
+      if(horiz){ row.style.transition='transform .15s';
+        if(dx<-70){ row.style.transform='translateX(-110%)'; setTimeout(()=>delLine(id),130); }
+        else if(dx>70){ row.style.transform='translateX(0)'; dupLine(id); }
+        else { row.style.transform='translateX(0)'; }
+      }
+      x0=null; horiz=false;
     });
   });
 }
