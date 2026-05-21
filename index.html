@@ -107,7 +107,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
 .seg button{flex:1;padding:9px;border:none;background:none;color:rgba(255,255,255,.6);border-radius:8px;font-size:13px;cursor:pointer}
 .seg button.on{background:var(--accent);color:#06121f;font-weight:700}
 /* 設定ギア */
-.head-set{margin-left:auto;background:none;border:none;color:rgba(255,255,255,.75);font-size:20px;cursor:pointer;padding:2px 6px}
+.head-set{margin-left:0;background:none;border:none;color:rgba(255,255,255,.75);font-size:20px;cursor:pointer;padding:2px 6px;display:flex;align-items:center}
+.head-set svg{display:block}
 /* ペースト ポップアップ */
 .paste-pop{position:fixed;z-index:600;background:#1a2030;border:1px solid #2c3550;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.45)}
 .paste-pop-btn{background:none;border:none;color:#fff;font-size:14px;font-weight:600;padding:10px 18px;cursor:pointer;border-radius:10px}
@@ -143,7 +144,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
     <span class="nm">N-GLOW</span>
     <span class="head-sub"><span>C</span><span>A</span><span>L</span><span>C</span><span>U</span><span>L</span><span>A</span><span>T</span><span>O</span><span>R</span></span>
   </div>
-  <button class="head-set" onclick="openModal('m-set')" title="設定" style="margin-left:auto">⚙</button>
+  <button class="head-set" onclick="shareTape()" title="共有" style="margin-left:auto"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/></svg></button>
+  <button class="head-set" onclick="openModal('m-set')" title="設定">⚙</button>
 </div>
 
 <div class="subhead">
@@ -676,6 +678,32 @@ function dupLine(id){
   const c=Object.assign({},t[idx]); c.id=newId(); c.name='';
   t.splice(idx+1,0,c); recomputeAll(t); saveTape(t); rebuildMap(); renderTape();
 }
+// ── 共有（過去の計算式＋合計をLINE等へ） ──
+function fmtExprPlain(s){
+  s=String(s==null?'':s);
+  s=s.replace(/#([a-z0-9]+)/ig,(m,id)=>{ const e=_map[id]; return !e?'?':(e.name?e.name:fmt(e.res)); });
+  return s.replace(/\d+\.?\d*/g,m=>fmt(m)).replace(/\*/g,'×').replace(/\//g,'÷').replace(/-/g,'−');
+}
+function tapeLineText(e){
+  const left=(e.disp!=null)?e.disp:fmtExprPlain(e.raw);
+  const resStr=isNaN(e.res)?'ERR':fmt(e.res);
+  if(String(left).replace(/,/g,'')===String(e.res)) return resStr;   // 単一数値は値だけ
+  return (e.name?'['+e.name+'] ':'')+left+' = '+resStr;
+}
+function shareTape(){
+  const t=loadTape();
+  if(!t.length){ toast('履歴がありません'); return; }
+  const nums=t.map(x=>+x.res).filter(v=>!isNaN(v)&&isFinite(v));
+  const sum=nums.reduce((a,b)=>a+b,0);
+  const nm=(activeSheet()&&activeSheet().name)?activeSheet().name:'';
+  const text=(nm?nm+'\n':'')+t.map(tapeLineText).join('\n')+'\n----------\n合計 '+fmtTrunc2(sum);
+  if(navigator.share){
+    navigator.share({text}).catch(()=>{});
+  } else if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>toast('コピーしました（共有未対応の端末）')).catch(()=>fallbackCopy(text,()=>toast('コピーしました')));
+  } else { fallbackCopy(text,()=>toast('コピーしました')); }
+}
+
 // クリップボードから貼り付け
 function pasteClip(){
   if(navigator.clipboard && navigator.clipboard.readText){

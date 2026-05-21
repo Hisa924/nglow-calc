@@ -1,6 +1,6 @@
 // N-GLOW Calculator Service Worker
 // ネットワーク優先: オンライン時は常に最新を取得し、オフライン時はキャッシュにフォールバック
-const CACHE = 'nglow-calc-v1';
+const CACHE = 'nglow-calc-v2';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
