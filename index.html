@@ -930,6 +930,11 @@ document.addEventListener('keydown', e=>{
 // 初期化
 requestPersist();
 initSheets(); migrateTape(); rebuildMap(); updSheetHeader(); updTaxLabels(); renderTape(); render();
+
+// サービスワーカー登録（オンライン時は常に最新を取得 → 再インストール不要で自動更新）
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+}
 </script>
 </body>
 </html>
