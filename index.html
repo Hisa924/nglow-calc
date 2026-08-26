@@ -61,11 +61,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
 .ref{color:#7cd6f7;font-weight:600}
 .name-chip{display:inline-block;font-size:11px;background:#234a72;color:#cfe9ff;border-radius:4px;padding:1px 7px;margin-right:6px;vertical-align:middle;cursor:pointer;font-weight:700}
 /* 現行の入力行 */
-.tape-line.current{border-bottom:1px solid rgba(79,195,247,.4);background:rgba(79,195,247,.06)}
+.tape-line.current{border-bottom:1px solid rgba(79,195,247,.4);background:rgba(79,195,247,.10);box-shadow:inset 3px 0 0 var(--accent)}
 .tape-line.current .line-main{color:#fff;font-weight:600;font-size:24px}
 .cur-ph{opacity:.3}
 .cur-eq{color:rgba(255,255,255,.3);font-weight:400;margin:0 3px}
 .cur-prev{color:rgba(255,255,255,.45);font-weight:600}
+.caret{display:inline-block;width:2px;height:1.02em;background:var(--accent);border-radius:1px;vertical-align:-.14em;margin-left:2px;box-shadow:0 0 6px rgba(79,195,247,.85);animation:caret-blink 1.05s step-end infinite}
+@keyframes caret-blink{0%,55%{opacity:1}56%,100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.caret{animation:none}}
 .tape-line.blank{min-height:30px;border-bottom:none;cursor:pointer}
 .tape-line.blank:active{background:rgba(79,195,247,.08)}
 .tape-empty2{padding:11px 18px;color:rgba(255,255,255,.32);font-size:13px}
@@ -605,15 +608,16 @@ function renderTape(){
   }).join('');
   // 現行の式（一覧の一番下・左寄せ）＋ 薄グレーの仮プレビュー
   let curInner;
+  const CARET = '<span class="caret"></span>';
   if(expr===''){
-    curInner = '<span class="cur-ph">0</span>';
+    curInner = '<span class="cur-ph">0</span>' + CARET;
   } else {
     const plain = /^-?\d*\.?\d*$/.test(expr);
     let prev='';
     if(!plain){
       try{ const v=curVal(); if(!isNaN(v)&&isFinite(v)) prev=` <span class="cur-eq">=</span> <span class="cur-prev">${fmt(v)}</span>`; }catch(e){}
     }
-    curInner = fmtExpr(expr) + prev;
+    curInner = fmtExpr(expr) + CARET + prev;
   }
   const editTag = editingId ? '<span class="name-chip" style="background:#7a4">編集中</span>' : '';
   const curRow = `<div class="tape-line current"><div class="line-main">${editTag}${curInner}</div></div>`;
