@@ -296,8 +296,16 @@ const fmt = n => {
   return (neg?'-':'')+(d!=null?i+'.'+d:i);
 };
 
+// 入力途中の数値はそのまま見せる（丸めない・末尾の0と小数点を保持・桁区切りだけ付ける）
+function fmtLive(s){
+  let [i,d] = String(s).split('.');
+  i = i.replace(/\B(?=(\d{3})+(?!\d))/g,',');
+  return d!==undefined ? i+'.'+d : i;
+}
+
 // 式を表示用に整形（参照#idは〔名前〕or値に、演算子記号、桁区切り）
-function fmtExpr(s){
+// live=true: 末尾の入力中の数値だけ fmtLive で整形（0.00… が消えないように）
+function fmtExpr(s, live){
   s = String(s==null ? '' : s);
   const refs=[];
   s = s.replace(/#([a-z0-9]+)/ig,(m,id)=>{
@@ -306,7 +314,8 @@ function fmtExpr(s){
     const idx = refs.push(`<span class="ref">${label}</span>`)-1;
     return String.fromCharCode(0xE000+idx);   // 数値整形を逃れるプレースホルダ
   });
-  s = s.replace(/\d+\.?\d*/g, m=>fmt(m)).replace(/\*/g,'×').replace(/\//g,'÷').replace(/-/g,'−');
+  s = s.replace(/\d+\.?\d*/g, (m,off)=> (live && off+m.length===s.length) ? fmtLive(m) : fmt(m))
+       .replace(/\*/g,'×').replace(/\//g,'÷').replace(/-/g,'−');
   s = s.replace(/[-]/g, ch=>refs[ch.charCodeAt(0)-0xE000]||'');
   return s;
 }
@@ -617,7 +626,7 @@ function renderTape(){
     if(!plain){
       try{ const v=curVal(); if(!isNaN(v)&&isFinite(v)) prev=` <span class="cur-eq">=</span> <span class="cur-prev">${fmt(v)}</span>`; }catch(e){}
     }
-    curInner = fmtExpr(expr) + CARET + prev;
+    curInner = fmtExpr(expr, true) + CARET + prev;
   }
   const editTag = editingId ? '<span class="name-chip" style="background:#7a4">編集中</span>' : '';
   const curRow = `<div class="tape-line current"><div class="line-main">${editTag}${curInner}</div></div>`;
