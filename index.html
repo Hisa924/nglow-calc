@@ -136,8 +136,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
 .sum-row .lnk{font-size:13px;color:rgba(255,255,255,.5);cursor:pointer;padding:2px 4px}
 .sum-row .lnk:active{color:#fff}
 /* ── 画面サイズ対応 ──
-   .side（便利ボタン＋キーパッド）は縦画面では存在しない扱い（display:contents）。
-   横長画面のときだけ「右カラム」として実体を持たせて2カラムにする */
+   .side（便利ボタン＋キーパッド）は基本 display:contents で「無いもの」扱い＝縦積み。
+   高さの足りない横画面（スマホ横）のときだけ、右カラムとして実体を持たせる */
 .side{display:contents}
 
 /* タブレットの縦画面: 少しだけ広く */
@@ -147,8 +147,33 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
   .tape-line.current .line-main{font-size:26px}
 }
 
-/* 横長画面: 左=テープ / 右=キーパッドの2カラム */
-@media (min-width:560px) and (orientation:landscape){
+/* 横画面 × 高さに余裕あり（タブレット横）:
+   画面いっぱいの1カラム。履歴は上に広く、キーパッドは下一面 */
+@media (min-width:560px) and (orientation:landscape) and (min-height:600px){
+  body{max-width:none}
+  .sheet-screen{max-width:760px}
+  .tape-line{font-size:19px;padding:13px 24px}
+  .tape-line.current .line-main{font-size:30px}
+  .tape-line .res{font-size:22px}
+  .re-bar{gap:8px;padding:6px 16px 7px}
+  .re-btn{padding:11px 1px;font-size:13px;border-radius:10px}
+  /* 高さを固定して、キーは 1fr で等分＝どの画面高でもキーパッドの比率が一定 */
+  .pad{
+    height:clamp(250px,46%,400px);
+    grid-auto-rows:minmax(0,1fr);
+    gap:9px;padding:7px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+  .key{
+    padding:0;border-radius:13px;font-size:26px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .key.fn{font-size:20px}
+  .key.op{font-size:28px}
+}
+
+/* 横画面 × 高さが足りない（スマホ横）:
+   下一面だとキーが潰れるので、左=テープ / 右=キーパッドの2カラム */
+@media (min-width:560px) and (orientation:landscape) and (max-height:599px){
   body{
     max-width:none;
     display:grid;
@@ -156,38 +181,31 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
     grid-template-rows:auto auto minmax(0,1fr) auto;
   }
   .head,.subhead{grid-column:1/-1}
-  .tape{grid-column:1;grid-row:3;min-height:0}
+  .tape{grid-column:1;grid-row:3;min-height:40px}
   .sum-bar{grid-column:1;grid-row:4;border-top:none}
   .side{
     display:flex;flex-direction:column;justify-content:flex-end;
     grid-column:2;grid-row:3/5;min-height:0;
     border-left:1px solid rgba(255,255,255,.08);
   }
-  /* キーは残りの高さを等分して伸縮するので、どの画面高でも必ず収まる */
   .pad{
-    flex:1 1 auto;min-height:0;max-height:min(100%,430px);
+    flex:1 1 auto;min-height:0;max-height:100%;
     grid-auto-rows:minmax(0,1fr);gap:7px;
     padding:6px 12px calc(10px + env(safe-area-inset-bottom));
   }
   .key{
-    padding:0;border-radius:12px;
-    font-size:clamp(15px,3.4vh,24px);
+    padding:0;border-radius:12px;font-size:clamp(15px,3.4vh,24px);
     display:flex;align-items:center;justify-content:center;
   }
-  /* .key.fn / .key.op は基本CSSの方が詳細度が高いので個別に上書き */
   .key.fn{font-size:clamp(13px,2.7vh,19px)}
   .key.op{font-size:clamp(16px,3.6vh,26px)}
   .re-bar{gap:6px;padding:6px 12px;flex-shrink:0}
   .re-btn{padding:8px 1px;font-size:clamp(10px,1.6vh,12.5px)}
-  /* 画面が広いぶん履歴の文字も大きく */
   .tape-line{font-size:clamp(15px,2.4vh,19px);padding:clamp(6px,1.6vh,13px) 24px}
   .tape-line.current .line-main{font-size:clamp(20px,3.8vh,30px)}
   .tape-line .res{font-size:clamp(17px,2.8vh,22px)}
   .sheet-screen{max-width:760px}
-}
-
-/* 横画面で高さが足りないとき: ヘッダーを圧縮して本体に高さを譲る */
-@media (orientation:landscape) and (max-height:540px){
+  /* ヘッダーを圧縮して本体に高さを譲る */
   .head{padding:5px 14px;gap:7px}
   .head img{width:24px;height:24px}
   .head .nm{font-size:16px}
@@ -195,7 +213,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
   .subhead{padding:3px 14px}
   .head-back{padding:3px 11px;font-size:12px}
   .cur-sheet{font-size:13px}
-  .tape{min-height:40px}
 }
 
 /* トースト */
