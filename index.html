@@ -66,9 +66,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
 .cur-ph{opacity:.3}
 .cur-eq{color:rgba(255,255,255,.3);font-weight:400;margin:0 3px}
 .cur-prev{color:rgba(255,255,255,.45);font-weight:600}
-.caret{display:inline-block;width:2px;height:1.02em;background:var(--accent);border-radius:1px;vertical-align:-.14em;margin-left:2px;box-shadow:0 0 6px rgba(79,195,247,.85);animation:caret-blink 1.05s step-end infinite}
+.caret{display:inline-block;width:2px;height:1.02em;background:var(--accent);border-radius:1px;vertical-align:-.14em;margin:0 -1px;box-shadow:0 0 6px rgba(79,195,247,.85);animation:caret-blink 1.05s step-end infinite}
 @keyframes caret-blink{0%,55%{opacity:1}56%,100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.caret{animation:none}}
+/* 入力中の式の1文字ずつ。タップでここにカーソルを置く */
+.tape-line.current{cursor:text}
+.cx{display:inline-block;min-width:4px}
+.key.pressed{filter:brightness(1.4)}
 .tape-line.blank{min-height:30px;border-bottom:none;cursor:pointer}
 .tape-line.blank:active{background:rgba(79,195,247,.08)}
 .tape-empty2{padding:11px 18px;color:rgba(255,255,255,.32);font-size:13px}
@@ -256,7 +260,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
   <button class="key fn" onclick="allClear()">AC</button>
   <button class="key fn" onclick="paren()">( )</button>
   <button class="key fn" id="sumtoggle" onclick="toggleSum()" title="集計"><svg width="26" height="17" viewBox="0 0 26 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 7 13 3 20 7"/><line x1="5" y1="13" x2="21" y2="13"/></svg></button>
-  <button class="key fn" onclick="backspace()">⌫</button>
+  <button class="key fn" id="key-bs" title="長押しでまとめて削除">⌫</button>
 
   <button class="key" onclick="num('7')">7</button>
   <button class="key" onclick="num('8')">8</button>
@@ -355,6 +359,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic Pro',san
 <script>
 // ── 電卓エンジン（式評価型 / カッコ・優先順位・参照対応） ──
 let expr = '';        // 構築中の式（数値/演算子/カッコ/参照 #id）
+let caret = 0;        // exprの中のカーソル位置（生の文字インデックス / 0〜expr.length）
 let editingId = null; // 編集中の履歴エントリid（in-place編集）
 let _map = {};        // id -> entry（参照解決用キャッシュ）
 const TAPE_KEY = 'nglow_calc_tape_v1';
@@ -380,9 +385,12 @@ const fmt = n => {
 
 // 入力途中の数値はそのまま見せる（丸めない・末尾の0と小数点を保持・桁区切りだけ付ける）
 function fmtLive(s){
-  let [i,d] = String(s).split('.');
-  i = i.replace(/\B(?=(\d{3})+(?!\d))/g,',');
-  return d!==undefined ? i+'.'+d : i;
+  s = String(s);
+  const i = s.indexOf('.');
+  const head = i<0 ? s : s.slice(0,i);
+  const rest = i<0 ? '' : s.slice(i);
+  // 整数部にカンマを足すだけ。元の文字は1つも落とさない（カーソル位置の対応付けが崩れないように）
+  return head.replace(/\B(?=(\d{3})+(?!\d))/g,',') + rest;
 }
 
 // 式を表示用に整形（参照#idは〔名前〕or値に、演算子記号、桁区切り）
@@ -400,6 +408,59 @@ function fmtExpr(s, live){
        .replace(/\*/g,'×').replace(/\//g,'÷').replace(/-/g,'−');
   s = s.replace(/[-]/g, ch=>refs[ch.charCodeAt(0)-0xE000]||'');
   return s;
+}
+
+// 式を「数値 / 参照 / 演算子」に分解。a,b は生の文字インデックス（評価側のトークン分けと同じ規則）
+function tokenizeExpr(s){
+  const out=[]; let i=0;
+  while(i<s.length){
+    const c=s[i];
+    if(c==='#'){ let j=i+1; while(j<s.length && /[a-z0-9]/i.test(s[j])) j++; out.push({t:'ref',a:i,b:j,raw:s.slice(i,j)}); i=j; }
+    else if(/[0-9.]/.test(c)){ let j=i; while(j<s.length && /[0-9.]/.test(s[j])) j++; out.push({t:'num',a:i,b:j,raw:s.slice(i,j)}); i=j; }
+    else { out.push({t:'op',a:i,b:i+1,raw:c}); i++; }
+  }
+  return out;
+}
+const OPSYM={'*':'×','/':'÷','-':'−'};
+// 入力中の式を1文字ずつ span にして描画する。
+// data-a/data-b = その文字の左側／右側にあたる生インデックス → タップでカーソルを置くのに使う。
+// 数値は fmtLive（カンマを足すだけ）なので、カンマ以外の表示文字が生文字と1対1で対応する。
+function renderCurExpr(){
+  const parts=[];
+  const put=(html,a,b)=>parts.push({html,a,b});
+  tokenizeExpr(expr).forEach(tk=>{
+    if(tk.t==='num'){
+      let k=0;
+      for(const ch of fmtLive(tk.raw)){
+        if(ch===','){ put(`<span class="cx" data-a="${tk.a+k}" data-b="${tk.a+k}">,</span>`, tk.a+k, tk.a+k); }
+        else { put(`<span class="cx" data-a="${tk.a+k}" data-b="${tk.a+k+1}">${esc(ch)}</span>`, tk.a+k, tk.a+k+1); k++; }
+      }
+    } else if(tk.t==='ref'){
+      const e=_map[tk.raw.slice(1)];
+      const label = !e ? '?' : (e.name ? e.name : fmt(e.res));
+      put(`<span class="cx ref" data-a="${tk.a}" data-b="${tk.b}">${esc(label)}</span>`, tk.a, tk.b);
+    } else {
+      put(`<span class="cx" data-a="${tk.a}" data-b="${tk.b}">${esc(OPSYM[tk.raw]||tk.raw)}</span>`, tk.a, tk.b);
+    }
+  });
+  let i=parts.findIndex(x=>x.b>caret);          // カーソルは「右端が caret を越える最初の文字」の前
+  if(i<0) i=parts.length;                       // どれも越えなければ末尾
+  const out=parts.map(x=>x.html);
+  out.splice(i,0,'<span class="caret"></span>');
+  return out.join('');
+}
+// 入力行をタップしてカーソルを移動
+function placeCaret(ev){
+  if(_lpFired){ _lpFired=false; return; }   // 長押し（ペースト）の直後はカーソルを動かさない
+  hidePastePop();
+  const el = ev.target && ev.target.closest ? ev.target.closest('.cx') : null;
+  if(el){
+    const r=el.getBoundingClientRect();
+    caretTo(ev.clientX < r.left + r.width/2 ? +el.dataset.a : +el.dataset.b);
+  } else {
+    const first=document.querySelector('.tape-line.current .cx');
+    caretTo(first && ev.clientX < first.getBoundingClientRect().left ? 0 : expr.length);
+  }
 }
 
 // ── 安全な式評価（再帰下降パーサ / 参照 #id 対応） ──
@@ -442,67 +503,90 @@ function render(){
 }
 
 // ── 入力 ──
+// カーソル対応: 「式の末尾」ではなく「カーソルの手前／直後」を見て編集する
+function setExpr(s, c){
+  expr = String(s==null?'':s);
+  caret = Math.max(0, Math.min(c==null?expr.length:c, expr.length));
+}
+function curL(){ return expr.slice(0, caret); }   // カーソルより左
+function curR(){ return expr.slice(caret); }      // カーソルより右
+function insAt(text){ setExpr(curL()+text+curR(), caret+text.length); render(); }
+
 function num(d){
-  const m = expr.match(/(\d+\.?\d*)$/);
-  if(m && m[1]==='0') expr = expr.slice(0,-1)+d;          // 先頭ゼロ防止
-  else expr += d;
-  render();
+  const l=curL(), m=l.match(/(\d+\.?\d*)$/);
+  if(m && m[1]==='0'){ setExpr(l.slice(0,-1)+d+curR(), caret); render(); return; }  // 先頭ゼロ防止
+  insAt(d);
 }
 function dot(){
-  const tail = (expr.match(/(\d*\.?\d*)$/)||[''])[0];
-  if(tail.includes('.')) return;
-  if(expr===''||/[+\-*/(]$/.test(expr)) expr+='0.';
-  else expr+='.';
-  render();
+  const l=curL(), r=curR();
+  // カーソルをまたぐ1つの数値として見て、すでに小数点があれば無視
+  const tl=(l.match(/[\d.]*$/)||[''])[0], tr=(r.match(/^[\d.]*/)||[''])[0];
+  if((tl+tr).includes('.')) return;
+  insAt((l===''||/[+\-*/(]$/.test(l)) ? '0.' : '.');
 }
 function setOp(o){
-  if(expr===''){ if(o==='-'){ expr='-'; render(); } return; }   // 先頭マイナス許可
-  if(/[+\-*/]$/.test(expr)) expr = expr.slice(0,-1)+o;          // 演算子の打ち替え
-  else expr += o;
-  render();
+  const l=curL();
+  if(l===''){ if(o==='-') insAt('-'); return; }                 // 先頭マイナス許可
+  if(/[+\-*/]$/.test(l)){ setExpr(l.slice(0,-1)+o+curR(), caret); render(); return; }  // 演算子の打ち替え
+  insAt(o);
 }
-function lparen(){
-  if(/[\d.)]$/.test(expr)) expr+='*(';                          // 数字や ) の直後は暗黙の×
-  else expr+='(';
-  render();
-}
+function lparen(){ insAt(/[\d.)]$/.test(curL()) ? '*(' : '('); } // 数字や ) の直後は暗黙の×
 function rparen(){
   const open=(expr.match(/\(/g)||[]).length, close=(expr.match(/\)/g)||[]).length;
   if(open<=close) return;
-  if(/[+\-*/(]$/.test(expr)) return;                            // 演算子・開きカッコ直後は閉じない
-  expr+=')'; render();
+  if(/[+\-*/(]$/.test(curL())) return;                          // 演算子・開きカッコ直後は閉じない
+  insAt(')');
 }
 function paren(){
   // 賢い ( ) キー: 閉じられる状況なら ) を、そうでなければ ( を入れる
   const open=(expr.match(/\(/g)||[]).length, close=(expr.match(/\)/g)||[]).length;
-  if(open>close && /[\d.)]$/.test(expr)) rparen();
+  if(open>close && /[\d.)]$/.test(curL())) rparen();
   else lparen();
 }
-function backspace(){ expr = expr.slice(0,-1); render(); }
-function allClear(){ expr=''; render(); }
-function clearEntry(){ const m=expr.match(/(\d+\.?\d*)$/); if(m) expr=expr.slice(0,m.index); else expr=''; render(); }
+function backspace(){
+  if(caret<=0) return;                                          // カーソルが先頭なら何もしない
+  const l=curL();
+  const ref=l.match(/#[a-z0-9]*$/i);                            // 参照は丸ごと消す（壊れた # を残さない）
+  const n=ref ? ref[0].length : 1;
+  setExpr(l.slice(0,-n)+curR(), caret-n); render();
+}
+function allClear(){ setExpr('',0); render(); }
+function clearEntry(){
+  const l=curL(), m=l.match(/(\d+\.?\d*)$/);
+  if(m) setExpr(l.slice(0,m.index)+curR(), m.index); else setExpr(curR(), 0);
+  render();
+}
 function percent(){
-  const m=expr.match(/(\d+\.?\d*)$/);
+  const l=curL(), m=l.match(/(\d+\.?\d*)$/);
   if(!m) return;
   const pv = Math.round(parseFloat(m[1])/100*1e8)/1e8;
-  expr = expr.slice(0, m.index) + pv;
+  setExpr(l.slice(0,m.index)+pv+curR(), m.index+String(pv).length);
   render();
 }
 function negate(){
-  const m=expr.match(/(\d+\.?\d*)$/); if(!m) return;
-  const i=m.index, n=m[1], before=expr.slice(0,i);
+  const l=curL(), m=l.match(/(\d+\.?\d*)$/); if(!m) return;
+  const i=m.index, n=m[1], before=l.slice(0,i), r=curR();
   if(before.endsWith('-')){
     const b2=before.slice(0,-1);
-    if(b2===''||/[+\-*/(]$/.test(b2)){ expr=b2+n; render(); return; }   // 単項マイナス除去
+    if(b2===''||/[+\-*/(]$/.test(b2)){ setExpr(b2+n+r, caret-1); render(); return; }   // 単項マイナス除去
   }
-  if(before===''||/[+\-*/(]$/.test(before)){ expr=before+'-'+n; render(); return; } // 単項マイナス付与
+  if(before===''||/[+\-*/(]$/.test(before)){ setExpr(before+'-'+n+r, caret+1); render(); return; } // 単項マイナス付与
+}
+// カーソル移動
+function caretTo(i){ caret=Math.max(0,Math.min(i,expr.length)); render(); }
+function caretStep(d){
+  let i=caret+d;
+  // 参照 #id の内側には止まらない（丸ごと1文字として跨ぐ）
+  const t=tokenizeExpr(expr).find(x=>x.t==='ref' && i>x.a && i<x.b);
+  if(t) i = d<0 ? t.a : t.b;
+  caretTo(i);
 }
 // 空白行タップ: 現在の式を確定して次の新規行へ移る
 function nextLine(){
   if(expr==='') return;                       // 何もなければ何もしない
   if(/[+\-*/(#]$/.test(expr)) return;         // 未完成の式はそのまま
   equals();                                   // 履歴に確定
-  expr=''; editingId=null; render();          // 次の新規行（空）へ
+  setExpr('',0); editingId=null; render();     // 次の新規行（空）へ
 }
 function equals(){
   if(expr===''||/[+\-*/(]$/.test(expr)||/#$/.test(expr)) return;
@@ -519,22 +603,22 @@ function equals(){
     t.push(target);
   }
   recomputeAll(t); saveTape(t); rebuildMap();
-  expr = (target && !isNaN(target.res)) ? String(target.res) : '';
+  setExpr((target && !isNaN(target.res)) ? String(target.res) : '');
   render();
 }
 
 // 値を現在式へ取り込む（リテラル）
 function insertValue(v){
   v=String(v);
-  if(expr===''||/[+\-*/(]$/.test(expr)) expr += v;
-  else expr = v;
+  if(expr===''||/[+\-*/(]$/.test(expr)) setExpr(expr+v);
+  else setExpr(v);
   render();
 }
 // 参照を取り込む（自動更新つき）: テープの結果タップ
 function insertRef(id){
   const tok='#'+id;
-  if(expr===''||/[+\-*/(]$/.test(expr)) expr += tok;
-  else expr = tok;
+  if(expr===''||/[+\-*/(]$/.test(expr)) setExpr(expr+tok);
+  else setExpr(tok);
   render();
 }
 
@@ -572,7 +656,7 @@ function closeSheetList(){ document.getElementById('sheet-screen').classList.rem
 function openSheet(id){
   if(!_sheets.sheets.find(s=>s.id===id)) return;
   _sheets.active=id; saveSheets();
-  editingId=null; expr=''; sumState=0;
+  editingId=null; setExpr('',0); sumState=0;
   rebuildMap(); updSheetHeader(); renderTape(); render();
   closeSheetList();
 }
@@ -603,7 +687,7 @@ function newSheet(){
   const id=newId();
   _sheets.sheets.push({id, name:'', tape:[], updatedAt:Date.now()});
   _sheets.active=id; saveSheets();
-  editingId=null; expr=''; sumState=0;
+  editingId=null; setExpr('',0); sumState=0;
   rebuildMap(); updSheetHeader(); renderTape(); render();
   closeSheetList();
   toast('新しいシートを作成しました');
@@ -620,7 +704,7 @@ function deleteSheet(id){
   if(!confirm('シート「'+(s.name||'無題')+'」を削除しますか？')) return;
   const wasActive = (s.id===_sheets.active);
   _sheets.sheets=_sheets.sheets.filter(x=>x.id!==s.id);
-  if(wasActive){ _sheets.active=_sheets.sheets[0].id; editingId=null; expr=''; sumState=0; }
+  if(wasActive){ _sheets.active=_sheets.sheets[0].id; editingId=null; setExpr('',0); sumState=0; }
   saveSheets();
   rebuildMap(); updSheetHeader(); renderTape(); render(); renderSheetList();
 }
@@ -699,19 +783,18 @@ function renderTape(){
   }).join('');
   // 現行の式（一覧の一番下・左寄せ）＋ 薄グレーの仮プレビュー
   let curInner;
-  const CARET = '<span class="caret"></span>';
   if(expr===''){
-    curInner = '<span class="cur-ph">0</span>' + CARET;
+    curInner = '<span class="cur-ph">0</span><span class="caret"></span>';
   } else {
     const plain = /^-?\d*\.?\d*$/.test(expr);
     let prev='';
     if(!plain){
       try{ const v=curVal(); if(!isNaN(v)&&isFinite(v)) prev=` <span class="cur-eq">=</span> <span class="cur-prev">${fmt(v)}</span>`; }catch(e){}
     }
-    curInner = fmtExpr(expr, true) + CARET + prev;
+    curInner = renderCurExpr() + prev;
   }
   const editTag = editingId ? '<span class="name-chip" style="background:#7a4">編集中</span>' : '';
-  const curRow = `<div class="tape-line current"><div class="line-main">${editTag}${curInner}</div></div>`;
+  const curRow = `<div class="tape-line current" onclick="placeCaret(event)"><div class="line-main">${editTag}${curInner}</div></div>`;
   const blankRow = `<div class="tape-line blank" onclick="nextLine()" title="タップで確定して次の行へ">&nbsp;</div>`;
   const hint = t.length===0 ? '<div class="tape-empty2">式を入力して = を押すと履歴に残ります</div>' : '';
   el.innerHTML = hint + committed + curRow + blankRow;
@@ -743,8 +826,8 @@ function bindSwipe(){
 function findE(id){ return loadTape().find(x=>x.id===id); }
 function editLine(id){
   const e=findE(id); if(!e) return;
-  if(e.disp!=null && /^-?\d+\.?\d*$/.test(e.raw)){ expr=e.raw; editingId=null; render(); toast('値を呼び戻しました'); return; }
-  editingId=id; expr=e.raw; render(); toast('編集中：= で更新');
+  if(e.disp!=null && /^-?\d+\.?\d*$/.test(e.raw)){ setExpr(e.raw); editingId=null; render(); toast('値を呼び戻しました'); return; }
+  editingId=id; setExpr(e.raw); render(); toast('編集中：= で更新');
 }
 function nameLine(id){
   const t=loadTape(); const e=t.find(x=>x.id===id); if(!e) return;
@@ -808,11 +891,12 @@ function pasteClip(){
 function applyPaste(txt){
   const cleaned=(txt||'').replace(/[,，]/g,'').replace(/[^0-9+\-*/().]/g,'');
   if(!cleaned){ toast('数値が見つかりません'); return; }
-  if(expr===''||/[+\-*/(]$/.test(expr)) expr+=cleaned; else expr=cleaned;
+  if(expr===''||/[+\-*/(]$/.test(expr)) setExpr(expr+cleaned); else setExpr(cleaned);
   render(); toast('貼り付けました');
 }
 // 現行入力欄の長押し → ペーストポップアップ
 let _lpTimer=null;
+let _lpFired=false;   // 長押しが成立した直後の click でカーソルを動かさない／ポップアップを閉じない
 function showPastePop(x,y){
   const p=document.getElementById('paste-pop');
   p.style.display='block';
@@ -830,7 +914,7 @@ function doPaste(){ hidePastePop(); pasteClip(); }
     if(!isCur(e.target)) return;
     const t=e.touches[0], sx=t.clientX, sy=t.clientY;
     clearTimeout(_lpTimer);
-    _lpTimer=setTimeout(()=>showPastePop(sx,sy), 480);
+    _lpTimer=setTimeout(()=>{ _lpFired=true; showPastePop(sx,sy); }, 480);
   },{passive:true});
   tapeEl.addEventListener('touchmove',()=>clearTimeout(_lpTimer),{passive:true});
   tapeEl.addEventListener('touchend',()=>clearTimeout(_lpTimer));
@@ -840,6 +924,35 @@ function doPaste(){ hidePastePop(); pasteClip(); }
   document.addEventListener('touchstart',e=>{ if(!e.target.closest('#paste-pop')) hidePastePop(); },{passive:true});
   document.addEventListener('mousedown',e=>{ if(!e.target.closest('#paste-pop')) hidePastePop(); });
 })();
+// ⌫ の長押し: 押した瞬間に1文字 → 0.4秒後から連続削除 → 1.8秒以上で全消し
+(function bindBackspaceHold(){
+  const btn=document.getElementById('key-bs');
+  if(!btn) return;
+  let tRepeat=null, tNuke=null, iv=null;
+  function stop(){
+    clearTimeout(tRepeat); clearTimeout(tNuke); clearInterval(iv);
+    tRepeat=tNuke=iv=null; btn.classList.remove('pressed');
+  }
+  function start(ev){
+    if(ev.button!=null && ev.button!==0) return;
+    ev.preventDefault();          // 直後の click を抑えて二重削除を防ぐ
+    stop();
+    btn.classList.add('pressed');
+    backspace();                                        // まず1文字
+    tRepeat=setTimeout(()=>{                            // 押しっぱなしで1文字ずつ
+      iv=setInterval(()=>{ if(expr===''){ stop(); return; } backspace(); }, 100);
+    }, 400);
+    tNuke=setTimeout(()=>{                              // さらに押し続けたら全消し
+      const had = expr!=='';
+      stop();
+      if(had){ allClear(); toast('すべて消去しました'); }
+    }, 1800);
+  }
+  btn.addEventListener('pointerdown', start);
+  ['pointerup','pointercancel','pointerleave'].forEach(t=>btn.addEventListener(t, stop));
+  btn.addEventListener('contextmenu', e=>e.preventDefault());   // 長押しのメニューを出さない
+})();
+
 function askClearTape(){
   if(loadTape().length===0) return;
   if(SET.confirmAC && !confirm('履歴をすべて消去しますか？')) return;
@@ -892,13 +1005,13 @@ function conv(factor){
   const cv = curVal();
   const v = trunc2(cv*factor);   // 小数点第2位まで（切り捨て）
   pushTape(`${fmt(cv)} ${factor>1?'坪':'㎡'}`, v, factor>1?'坪→㎡':'㎡→坪');
-  expr = String(v); render();
+  setExpr(String(v)); render();
 }
 function taxOp(factor, tag){
   const cv = curVal();
   const v = Math.round(cv*factor);
   pushTape(`${fmt(cv)} → ${tag}`, v, tag);
-  expr = String(v); render();
+  setExpr(String(v)); render();
 }
 function taxIncl(){ taxOp(1+SET.tax/100, `税込${SET.tax}%`); }
 function taxExcl(){ taxOp(1/(1+SET.tax/100), `税抜`); }
@@ -1008,7 +1121,7 @@ function sendYield(){
   const v = document.getElementById('y-out').dataset.v;
   if(v){ const p=document.getElementById('y-price').value, r=document.getElementById('y-rent').value;
     pushTape(`利回り ${fmt(r)}万 ÷ ${fmt(p)}万`, parseFloat(v), '利回り');
-    expr=String(v); render(); }
+    setExpr(String(v)); render(); }
   closeModal('m-yield');
 }
 // 値引き
@@ -1031,7 +1144,7 @@ function sendDisc(){
   const v=document.getElementById('d-out').dataset.v;
   if(v){ const b=document.getElementById('d-base').value, p=document.getElementById('d-pct').value;
     pushTape(`${fmt(b)} −${p}%`, parseFloat(v), '値引き');
-    expr=String(v); render(); }
+    setExpr(String(v)); render(); }
   closeModal('m-disc');
 }
 
@@ -1046,6 +1159,10 @@ document.addEventListener('keydown', e=>{
   else if(k===')'){ rparen(); }
   else if(k==='Enter'||k==='='){ e.preventDefault(); equals(); }
   else if(k==='Backspace') backspace();
+  else if(k==='ArrowLeft'){ e.preventDefault(); caretStep(-1); }
+  else if(k==='ArrowRight'){ e.preventDefault(); caretStep(1); }
+  else if(k==='Home'){ e.preventDefault(); caretTo(0); }
+  else if(k==='End'){ e.preventDefault(); caretTo(expr.length); }
   else if(k==='Escape') allClear();
   else if(k==='%') percent();
 });
